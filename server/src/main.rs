@@ -1,7 +1,17 @@
-use axum::{Router, routing::get};
 pub mod db_collections;
+pub mod dtos;
 pub mod migrations;
+use axum::{
+    Json, Router,
+    extract::State,
+    routing::{get, post},
+};
+use dtos::*;
 use migrations::*;
+use mongodb::bson::oid::ObjectId;
+use std::sync::Arc;
+
+use crate::db_collections::{Chats, Messages, Users};
 
 #[tokio::main]
 async fn main() {
@@ -9,14 +19,65 @@ async fn main() {
     let client = mongodb::Client::with_uri_str("mongodb://localhost:27017")
         .await
         .unwrap();
-    let db = client.database("leo_gpt");
+    let db = Arc::new(client.database("leo_gpt"));
 
     // Run migrations
     run_migrations(&db).await.unwrap();
     // build our application with a single route
-    let app = Router::new().route("/", get(|| async { "Hello, World!" }));
+    let app = Router::new()
+        .route("/", get(root))
+        .route(
+            "/history",
+            post(
+                |state: State<Arc<mongodb::Database>>, payload: Json<PaginationDTO<UserDTO>>| {
+                    get_history(state, payload)
+                },
+            ),
+        )
+        .route(
+            "/messages",
+            post(
+                |state: State<Arc<mongodb::Database>>, payload: Json<PaginationDTO<ChatDTO>>| {
+                    get_messages(state, payload)
+                },
+            ),
+        )
+        .with_state(db.clone());
 
     // run our app with hyper, listening globally on port 3000
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
     axum::serve(listener, app).await.unwrap();
+}
+
+async fn root() -> &'static str {
+    "Hello, World!"
+}
+
+async fn get_history(
+    axum::extract::State(db): axum::extract::State<Arc<mongodb::Database>>,
+    Json(payload): Json<PaginationDTO<UserDTO>>,
+) -> Result<axum::Json<Vec<Chats>>, String> {
+    println!("Received payload: {:?}", payload);
+    let user_id = Users::get_id_by_username(&*db, &payload.data.username)
+        .await
+        .map_err(|e| format!("Failed to get user ID: {}", e))?;
+    let chats = Chats::get_all_user_chats(&*db, &user_id)
+        .await
+        .map_err(|e| format!("Failed to get chats: {}", e))?;
+    Ok(Json(chats))
+}
+
+async fn get_messages(
+    axum::extract::State(db): axum::extract::State<Arc<mongodb::Database>>,
+    Json(payload): Json<PaginationDTO<ChatDTO>>,
+) -> Result<axum::Json<Vec<Messages>>, String> {
+    println!("Received payload: {:?}", payload);
+
+    let chat_id: ObjectId = ObjectId::parse_str(&payload.data.chat_id)
+        .map_err(|e| format!("Invalid chat ID: {}", e))?;
+
+    let messages = Messages::get_all_chat_messages(&*db, chat_id)
+        .await
+        .map_err(|e| format!("Failed to get messages: {}", e))?;
+    Ok(Json(messages))
 }
