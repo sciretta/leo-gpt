@@ -42,6 +42,14 @@ async fn main() {
                 },
             ),
         )
+        .route(
+            "/new_chat",
+            post(
+                |state: State<Arc<mongodb::Database>>, payload: Json<ChatDTO>| {
+                    create_chat(state, payload)
+                },
+            ),
+        )
         .with_state(db.clone());
 
     // run our app with hyper, listening globally on port 3000
@@ -58,7 +66,7 @@ async fn get_history(
     Json(payload): Json<PaginationDTO<UserDTO>>,
 ) -> Result<axum::Json<Vec<Chats>>, String> {
     println!("Received payload: {:?}", payload);
-    let user_id = Users::get_id_by_username(&*db, &payload.data.username)
+    let user_id = Users::get_id_by_username(&*db, &payload.data.username.unwrap())
         .await
         .map_err(|e| format!("Failed to get user ID: {}", e))?;
     let chats = Chats::get_all_user_chats(&*db, &user_id)
@@ -73,10 +81,26 @@ async fn get_messages(
 ) -> Result<axum::Json<Vec<Messages>>, String> {
     println!("Received payload: {:?}", payload);
 
-    let chat_id: ObjectId = ObjectId::parse_str(&payload.data.chat_id)
+    let chat_id: ObjectId = ObjectId::parse_str(&payload.data.chat_id.unwrap())
         .map_err(|e| format!("Invalid chat ID: {}", e))?;
 
     let messages = Messages::get_all_chat_messages(&*db, chat_id)
+        .await
+        .map_err(|e| format!("Failed to get messages: {}", e))?;
+    Ok(Json(messages))
+}
+
+async fn create_chat(
+    axum::extract::State(db): axum::extract::State<Arc<mongodb::Database>>,
+    Json(payload): Json<ChatDTO>,
+) -> Result<axum::Json<Chats>, String> {
+    println!("Received payload: {:?}", payload);
+
+    let chat_name = payload.chat_name.expect("param chat_name must be provided");
+    let user_id: ObjectId = ObjectId::parse_str(&payload.chat_id.unwrap())
+        .map_err(|e| format!("Invalid user ID: {}", e))?;
+
+    let messages = Chats::create_chat(&*db, &user_id, &chat_name)
         .await
         .map_err(|e| format!("Failed to get messages: {}", e))?;
     Ok(Json(messages))

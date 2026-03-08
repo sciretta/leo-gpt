@@ -9,10 +9,11 @@ pub struct PaginationDTO<T> {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct UserDTO {
-    pub username: String,
+    pub username: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ChatDTO {
-    pub chat_id: String,
+    pub chat_id: Option<String>,
+    pub chat_name: Option<String>,
 }

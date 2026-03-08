@@ -55,6 +55,25 @@ impl Chats {
         }
         Ok(chats)
     }
+
+    pub async fn create_chat(
+        db: &mongodb::Database,
+        user_id: &ObjectId,
+        chat_name: &str,
+    ) -> Result<Chats, Error> {
+        let collection = db.collection::<Chats>("chats");
+        let new_chat = Chats {
+            _id: None,
+            user_id: user_id.clone(),
+            chat_name: chat_name.to_string(),
+            created_at: chrono::Utc::now().to_rfc3339(),
+        };
+        let insert_result = collection.insert_one(new_chat.clone()).await.unwrap();
+        Ok(Chats {
+            _id: Some(insert_result.inserted_id.as_object_id().unwrap()),
+            ..new_chat
+        })
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
