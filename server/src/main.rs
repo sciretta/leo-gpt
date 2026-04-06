@@ -27,10 +27,10 @@ async fn main() {
     let app = Router::new()
         .route("/", get(root))
         .route(
-            "/history",
+            "/chats",
             post(
                 |state: State<Arc<mongodb::Database>>, payload: Json<PaginationDTO<UserDTO>>| {
-                    get_history(state, payload)
+                    get_chats(state, payload)
                 },
             ),
         )
@@ -50,6 +50,14 @@ async fn main() {
                 },
             ),
         )
+        .route(
+            "/new_message",
+            post(
+                |state: State<Arc<mongodb::Database>>, payload: Json<MessageDTO>| {
+                    create_message(state, payload)
+                },
+            ),
+        )
         .with_state(db.clone());
 
     // run our app with hyper, listening globally on port 3000
@@ -61,7 +69,7 @@ async fn root() -> &'static str {
     "Hello, World!"
 }
 
-async fn get_history(
+async fn get_chats(
     axum::extract::State(db): axum::extract::State<Arc<mongodb::Database>>,
     Json(payload): Json<PaginationDTO<UserDTO>>,
 ) -> Result<axum::Json<Vec<Chats>>, String> {
@@ -97,11 +105,28 @@ async fn create_chat(
     println!("Received payload: {:?}", payload);
 
     let chat_name = payload.chat_name.expect("param chat_name must be provided");
-    let user_id: ObjectId = ObjectId::parse_str(&payload.chat_id.unwrap())
+    let user_id: ObjectId = ObjectId::parse_str(&payload.user_id.unwrap())
         .map_err(|e| format!("Invalid user ID: {}", e))?;
 
     let messages = Chats::create_chat(&*db, &user_id, &chat_name)
         .await
         .map_err(|e| format!("Failed to get messages: {}", e))?;
     Ok(Json(messages))
+}
+
+async fn create_message(
+    axum::extract::State(db): axum::extract::State<Arc<mongodb::Database>>,
+    Json(payload): Json<MessageDTO>,
+) -> Result<axum::Json<Messages>, String> {
+    println!("Received payload: {:?}", payload);
+
+    let chat_id: ObjectId = ObjectId::parse_str(&payload.chat_id.unwrap())
+        .map_err(|e| format!("Invalid chat ID: {}", e))?;
+
+    let body = payload.body.expect("param body must be provided");
+
+    let message = Messages::create_message(&*db, &chat_id, body)
+        .await
+        .map_err(|e| format!("Failed to create message: {}", e))?;
+    Ok(Json(message))
 }

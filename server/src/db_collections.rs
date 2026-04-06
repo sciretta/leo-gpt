@@ -1,6 +1,10 @@
 use std::io::Error;
 
 use mongodb::bson::{doc, oid::ObjectId};
+use ollama_rs::{
+    Ollama,
+    generation::chat::{ChatMessage, request::ChatMessageRequest},
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -8,6 +12,15 @@ pub struct MigrationRecord {
     pub name: String,
     pub applied_at: String,
 }
+
+pub trait UserBasics {
+    async fn user_exists(db: &mongodb::Database, user_id: &ObjectId) -> Result<bool, Error> {
+        let collection = db.collection::<Users>("users");
+        let filter = doc! { "_id": user_id };
+        Ok(collection.find_one(filter).await.unwrap().is_some())
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Users {
     #[serde(default, rename = "_id", skip_serializing_if = "Option::is_none")]
@@ -61,6 +74,10 @@ impl Chats {
         user_id: &ObjectId,
         chat_name: &str,
     ) -> Result<Chats, Error> {
+        let user_exists = Self::user_exists(db, user_id).await.unwrap();
+        if !user_exists {
+            return Err(Error::new(std::io::ErrorKind::NotFound, "User not found"));
+        }
         let collection = db.collection::<Chats>("chats");
         let new_chat = Chats {
             _id: None,
@@ -75,6 +92,8 @@ impl Chats {
         })
     }
 }
+
+impl UserBasics for Chats {}
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Messages {
@@ -100,4 +119,65 @@ impl Messages {
         }
         Ok(messages)
     }
+
+    pub async fn create_message(
+        db: &mongodb::Database,
+        chat_id: &ObjectId,
+        body: String,
+    ) -> Result<Messages, Error> {
+        let model = "llama3".to_string();
+
+        let ollama = Ollama::default();
+
+        let mut history: Vec<ChatMessage> = Vec::new();
+
+        let prev_messages = Self::get_all_chat_messages(db, chat_id.clone())
+            .await
+            .unwrap();
+
+        for msg in prev_messages {
+            if msg.is_user {
+                history.push(ChatMessage::user(msg.content));
+            } else {
+                history.push(ChatMessage::assistant(msg.content));
+            }
+        }
+
+        let request = ChatMessageRequest::new(model.clone(), vec![ChatMessage::user(body.clone())]);
+
+        let resp = ollama
+            .send_chat_messages_with_history(&mut history, request)
+            .await
+            .unwrap();
+
+        let assistant_text = resp.message.content.clone();
+
+        let collection = db.collection::<Messages>("messages");
+        let new_message = Messages {
+            _id: None,
+            chat_id: chat_id.clone(),
+            is_user: true,
+            content: body,
+            created_at: chrono::Utc::now().to_rfc3339(),
+        };
+        let insert_result = collection.insert_one(new_message.clone()).await.unwrap();
+        insert_result.inserted_id.as_object_id().unwrap();
+
+        let assistant_message = Messages {
+            _id: None,
+            chat_id: chat_id.clone(),
+            is_user: false,
+            content: assistant_text,
+            created_at: chrono::Utc::now().to_rfc3339(),
+        };
+        let insert_result = collection
+            .insert_one(assistant_message.clone())
+            .await
+            .unwrap();
+        insert_result.inserted_id.as_object_id().unwrap();
+
+        Ok(assistant_message)
+    }
 }
+
+impl UserBasics for Messages {}

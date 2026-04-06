@@ -16,4 +16,11 @@ pub struct UserDTO {
 pub struct ChatDTO {
     pub chat_id: Option<String>,
     pub chat_name: Option<String>,
+    pub user_id: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct MessageDTO {
+    pub chat_id: Option<String>,
+    pub body: Option<String>,
 }
