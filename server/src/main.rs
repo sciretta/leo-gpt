@@ -9,7 +9,7 @@ use axum::{
     routing::{get, post},
 };
 use dtos::*;
-use futures::stream::{self, StreamExt};
+use futures::stream::{self};
 use migrations::*;
 use mongodb::bson::oid::ObjectId;
 use std::sync::Arc;
@@ -118,23 +118,6 @@ async fn create_chat(
     Ok(Json(messages))
 }
 
-// async fn create_message(
-//     axum::extract::State(db): axum::extract::State<Arc<mongodb::Database>>,
-//     Json(payload): Json<MessageDTO>,
-// ) -> Result<axum::Json<Messages>, String> {
-//     println!("Received payload: {:?}", payload);
-
-//     let chat_id: ObjectId = ObjectId::parse_str(&payload.chat_id.unwrap())
-//         .map_err(|e| format!("Invalid chat ID: {}", e))?;
-
-//     let body = payload.body.expect("param body must be provided");
-
-//     let message = Messages::create_message(&*db, &chat_id, body)
-//         .await
-//         .map_err(|e| format!("Failed to create message: {}", e))?;
-//     Ok(Json(message))
-// }
-
 async fn create_message_stream(
     axum::extract::State(db): axum::extract::State<Arc<mongodb::Database>>,
     Json(payload): Json<MessageDTO>,
@@ -156,10 +139,11 @@ async fn create_message_stream(
             let tx_clone = tx.clone();
             let chunk_clone = chunk.clone();
             tokio::spawn(async move {
-                tx_clone.send(chunk_clone).await;
+                tx_clone.send(chunk_clone).await.unwrap();
             });
         })
-        .await;
+        .await
+        .unwrap();
     });
 
     let stream = stream::unfold(rx, |mut rx| async move {

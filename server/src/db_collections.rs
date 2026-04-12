@@ -7,7 +7,7 @@ use futures::StreamExt;
 use mongodb::bson::{doc, oid::ObjectId};
 use ollama_rs::{
     Ollama,
-    generation::chat::{ChatMessage, ChatMessageResponse, request::ChatMessageRequest},
+    generation::chat::{ChatMessage, request::ChatMessageRequest},
 };
 use serde::{Deserialize, Serialize};
 
@@ -124,65 +124,6 @@ impl Messages {
         Ok(messages)
     }
 
-    // pub async fn create_message(
-    //     db: &mongodb::Database,
-    //     chat_id: &ObjectId,
-    //     body: String,
-    // ) -> Result<Messages, Error> {
-    //     let model = "llama3".to_string();
-
-    //     let ollama = Ollama::default();
-
-    //     let mut history: Vec<ChatMessage> = Vec::new();
-
-    //     let prev_messages = Self::get_all_chat_messages(db, chat_id.clone())
-    //         .await
-    //         .unwrap();
-
-    //     for msg in prev_messages {
-    //         if msg.is_user {
-    //             history.push(ChatMessage::user(msg.content));
-    //         } else {
-    //             history.push(ChatMessage::assistant(msg.content));
-    //         }
-    //     }
-
-    //     let request = ChatMessageRequest::new(model.clone(), vec![ChatMessage::user(body.clone())]);
-
-    //     let resp = ollama
-    //         .send_chat_messages_with_history(&mut history, request)
-    //         .await
-    //         .unwrap();
-
-    //     let assistant_text = resp.message.content.clone();
-
-    //     let collection = db.collection::<Messages>("messages");
-    //     let new_message = Messages {
-    //         _id: None,
-    //         chat_id: chat_id.clone(),
-    //         is_user: true,
-    //         content: body,
-    //         created_at: chrono::Utc::now().to_rfc3339(),
-    //     };
-    //     let insert_result = collection.insert_one(new_message.clone()).await.unwrap();
-    //     insert_result.inserted_id.as_object_id().unwrap();
-
-    //     let assistant_message = Messages {
-    //         _id: None,
-    //         chat_id: chat_id.clone(),
-    //         is_user: false,
-    //         content: assistant_text,
-    //         created_at: chrono::Utc::now().to_rfc3339(),
-    //     };
-    //     let insert_result = collection
-    //         .insert_one(assistant_message.clone())
-    //         .await
-    //         .unwrap();
-    //     insert_result.inserted_id.as_object_id().unwrap();
-
-    //     Ok(assistant_message)
-    // }
-
     pub async fn create_message_stream<F>(
         db: &mongodb::Database,
         chat_id: &ObjectId,
@@ -209,8 +150,6 @@ impl Messages {
         }
 
         let request = ChatMessageRequest::new(model.clone(), vec![ChatMessage::user(body.clone())]);
-
-        println!("History: {:?}", history);
 
         let history = Arc::new(Mutex::new(history));
 
