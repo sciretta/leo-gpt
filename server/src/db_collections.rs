@@ -1,9 +1,13 @@
-use std::io::Error;
+use std::{
+    io::Error,
+    sync::{Arc, Mutex},
+};
 
+use futures::StreamExt;
 use mongodb::bson::{doc, oid::ObjectId};
 use ollama_rs::{
     Ollama,
-    generation::chat::{ChatMessage, request::ChatMessageRequest},
+    generation::chat::{ChatMessage, ChatMessageResponse, request::ChatMessageRequest},
 };
 use serde::{Deserialize, Serialize};
 
@@ -120,15 +124,76 @@ impl Messages {
         Ok(messages)
     }
 
-    pub async fn create_message(
+    // pub async fn create_message(
+    //     db: &mongodb::Database,
+    //     chat_id: &ObjectId,
+    //     body: String,
+    // ) -> Result<Messages, Error> {
+    //     let model = "llama3".to_string();
+
+    //     let ollama = Ollama::default();
+
+    //     let mut history: Vec<ChatMessage> = Vec::new();
+
+    //     let prev_messages = Self::get_all_chat_messages(db, chat_id.clone())
+    //         .await
+    //         .unwrap();
+
+    //     for msg in prev_messages {
+    //         if msg.is_user {
+    //             history.push(ChatMessage::user(msg.content));
+    //         } else {
+    //             history.push(ChatMessage::assistant(msg.content));
+    //         }
+    //     }
+
+    //     let request = ChatMessageRequest::new(model.clone(), vec![ChatMessage::user(body.clone())]);
+
+    //     let resp = ollama
+    //         .send_chat_messages_with_history(&mut history, request)
+    //         .await
+    //         .unwrap();
+
+    //     let assistant_text = resp.message.content.clone();
+
+    //     let collection = db.collection::<Messages>("messages");
+    //     let new_message = Messages {
+    //         _id: None,
+    //         chat_id: chat_id.clone(),
+    //         is_user: true,
+    //         content: body,
+    //         created_at: chrono::Utc::now().to_rfc3339(),
+    //     };
+    //     let insert_result = collection.insert_one(new_message.clone()).await.unwrap();
+    //     insert_result.inserted_id.as_object_id().unwrap();
+
+    //     let assistant_message = Messages {
+    //         _id: None,
+    //         chat_id: chat_id.clone(),
+    //         is_user: false,
+    //         content: assistant_text,
+    //         created_at: chrono::Utc::now().to_rfc3339(),
+    //     };
+    //     let insert_result = collection
+    //         .insert_one(assistant_message.clone())
+    //         .await
+    //         .unwrap();
+    //     insert_result.inserted_id.as_object_id().unwrap();
+
+    //     Ok(assistant_message)
+    // }
+
+    pub async fn create_message_stream<F>(
         db: &mongodb::Database,
         chat_id: &ObjectId,
         body: String,
-    ) -> Result<Messages, Error> {
+        mut on_chunk: F,
+    ) -> Result<(), Error>
+    where
+        F: FnMut(String),
+    {
         let model = "llama3".to_string();
-
         let ollama = Ollama::default();
-
         let mut history: Vec<ChatMessage> = Vec::new();
 
         let prev_messages = Self::get_all_chat_messages(db, chat_id.clone())
@@ -145,13 +210,32 @@ impl Messages {
 
         let request = ChatMessageRequest::new(model.clone(), vec![ChatMessage::user(body.clone())]);
 
-        let resp = ollama
-            .send_chat_messages_with_history(&mut history, request)
+        println!("History: {:?}", history);
+
+        let history = Arc::new(Mutex::new(history));
+
+        let mut resp = ollama
+            .send_chat_messages_with_history_stream(history, request)
             .await
             .unwrap();
 
-        let assistant_text = resp.message.content.clone();
+        let mut assistant_text = String::new();
 
+        while let Some(chunk_result) = resp.next().await {
+            match chunk_result {
+                Ok(chunk) => {
+                    let chunk_content = chunk.message.content;
+                    assistant_text.push_str(&chunk_content);
+                    on_chunk(chunk_content); // Send chunk to callback
+                }
+                Err(e) => {
+                    eprintln!("Error receiving chunk: {:?}", e);
+                    break;
+                }
+            }
+        }
+
+        // Save user message
         let collection = db.collection::<Messages>("messages");
         let new_message = Messages {
             _id: None,
@@ -163,6 +247,7 @@ impl Messages {
         let insert_result = collection.insert_one(new_message.clone()).await.unwrap();
         insert_result.inserted_id.as_object_id().unwrap();
 
+        // Save assistant message
         let assistant_message = Messages {
             _id: None,
             chat_id: chat_id.clone(),
@@ -176,7 +261,7 @@ impl Messages {
             .unwrap();
         insert_result.inserted_id.as_object_id().unwrap();
 
-        Ok(assistant_message)
+        Ok(())
     }
 }
 

@@ -4,12 +4,16 @@ pub mod migrations;
 use axum::{
     Json, Router,
     extract::State,
+    http::StatusCode,
+    response::sse::{Event, Sse},
     routing::{get, post},
 };
 use dtos::*;
+use futures::stream::{self, StreamExt};
 use migrations::*;
 use mongodb::bson::oid::ObjectId;
 use std::sync::Arc;
+use tokio::sync::mpsc;
 
 use crate::db_collections::{Chats, Messages, Users};
 
@@ -54,7 +58,7 @@ async fn main() {
             "/new_message",
             post(
                 |state: State<Arc<mongodb::Database>>, payload: Json<MessageDTO>| {
-                    create_message(state, payload)
+                    create_message_stream(state, payload)
                 },
             ),
         )
@@ -114,19 +118,59 @@ async fn create_chat(
     Ok(Json(messages))
 }
 
-async fn create_message(
+// async fn create_message(
+//     axum::extract::State(db): axum::extract::State<Arc<mongodb::Database>>,
+//     Json(payload): Json<MessageDTO>,
+// ) -> Result<axum::Json<Messages>, String> {
+//     println!("Received payload: {:?}", payload);
+
+//     let chat_id: ObjectId = ObjectId::parse_str(&payload.chat_id.unwrap())
+//         .map_err(|e| format!("Invalid chat ID: {}", e))?;
+
+//     let body = payload.body.expect("param body must be provided");
+
+//     let message = Messages::create_message(&*db, &chat_id, body)
+//         .await
+//         .map_err(|e| format!("Failed to create message: {}", e))?;
+//     Ok(Json(message))
+// }
+
+async fn create_message_stream(
     axum::extract::State(db): axum::extract::State<Arc<mongodb::Database>>,
     Json(payload): Json<MessageDTO>,
-) -> Result<axum::Json<Messages>, String> {
+) -> Result<
+    Sse<impl futures::stream::Stream<Item = Result<Event, axum::Error>>>,
+    (StatusCode, String),
+> {
     println!("Received payload: {:?}", payload);
 
     let chat_id: ObjectId = ObjectId::parse_str(&payload.chat_id.unwrap())
-        .map_err(|e| format!("Invalid chat ID: {}", e))?;
+        .map_err(|e| (StatusCode::BAD_REQUEST, format!("Invalid chat ID: {}", e)))?;
 
     let body = payload.body.expect("param body must be provided");
 
-    let message = Messages::create_message(&*db, &chat_id, body)
-        .await
-        .map_err(|e| format!("Failed to create message: {}", e))?;
-    Ok(Json(message))
+    let (tx, rx) = mpsc::channel(100);
+
+    tokio::spawn(async move {
+        Messages::create_message_stream(&*db, &chat_id, body, |chunk| {
+            let tx_clone = tx.clone();
+            let chunk_clone = chunk.clone();
+            tokio::spawn(async move {
+                tx_clone.send(chunk_clone).await;
+            });
+        })
+        .await;
+    });
+
+    let stream = stream::unfold(rx, |mut rx| async move {
+        match rx.recv().await {
+            Some(chunk) => {
+                let event = Event::default().data(chunk);
+                Some((Ok(event), rx))
+            }
+            None => None,
+        }
+    });
+
+    Ok(Sse::new(stream))
 }
