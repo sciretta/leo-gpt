@@ -7,36 +7,28 @@
 
 import SwiftUI
 
-struct ChatMessage:Identifiable{
-    let id = UUID()
-    let text:String
-    let isUser:Bool
-}
-
 struct ChatView: View {
-    @State private var messages: [ChatMessage] =
-    (1...30).map { ChatMessage(text: "message \($0)", isUser: Bool.random()) }
+    let chatId: String
+    @State private var messages: [Message] = []
     @State private var messageText: String = ""
+    @EnvironmentObject var appState: AppState
     
     var body: some View {
         VStack{
             VStack(alignment: .center) {
-                Text("Conversation")
-                    .font(.title2)
-                    .bold()
                 
                 ScrollView {
                     VStack(alignment: .leading, spacing: 12) {
-                        ForEach(messages) { item in
+                        ForEach(messages, id: \.self) { item in
                             HStack {
                                 if item.isUser {
                                     Spacer()
-                                    Text(item.text)
+                                    Text(item.content)
                                         .padding()
                                         .background(Color.blue.opacity(0.8))
                                         .cornerRadius(10)
                                 } else {
-                                    Text(item.text)
+                                    Text(item.content)
                                         .padding()
                                         .background(Color.green.opacity(0.9))
                                         .cornerRadius(10)
@@ -54,7 +46,45 @@ struct ChatView: View {
                 "Ask something...",
                 text: $messageText
             ).onSubmit {
-                messages.append( ChatMessage(text: $messageText.wrappedValue, isUser: true))
+                let currentMessage = messageText
+                if chatId.isEmpty {
+                    Task {
+                        do {
+                            let res = try await createChat(userId: appState.userId, chatName: String(currentMessage.prefix(20)))
+                            
+                            print("Chat created", res)
+                            
+                            if res {
+                                print("create message logic here")
+                            }
+                            
+                        } catch {
+                            print("Error", error)
+                        }
+                    }
+                }else {
+                    Task {
+                        do {
+                            print("create message logic here")
+                            
+                            
+                        } catch {
+                            print("Error", error)
+                        }
+                    }
+                }
+                
+                Task {
+                    do {
+                        if !chatId.isEmpty {
+                            let newMessages = try await fetchMessages(chatId:chatId)
+                            messages = newMessages
+                        }
+                    } catch {
+                        print("Error", error)
+                    }
+                }
+                
                 messageText = ""
             }
             .padding(14)
@@ -66,10 +96,22 @@ struct ChatView: View {
             .textInputAutocapitalization(.never)
             .disableAutocorrection(true).padding(.horizontal)
             
-        }.frame(maxHeight: .infinity,alignment: .bottom)
+        }.onAppear{
+            Task {
+                do {
+                    if !chatId.isEmpty {
+                        let newMessages = try await fetchMessages(chatId:chatId)
+                        messages = newMessages
+                    }
+                } catch {
+                    print("Error", error)
+                }
+            }
+        }
+        .frame(maxHeight: .infinity,alignment: .bottom)
     }
 }
 
 #Preview {
-    ChatView()
+    ChatView(chatId: "69dbfef957eb0152781f9ffc").environmentObject(AppState())
 }
