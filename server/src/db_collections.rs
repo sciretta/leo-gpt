@@ -133,7 +133,7 @@ impl Messages {
     where
         F: FnMut(String),
     {
-        let model = "llama3".to_string();
+        let model = "llama3.2:1b".to_string();
         let ollama = Ollama::default();
         let mut history: Vec<ChatMessage> = Vec::new();
 
@@ -164,6 +164,9 @@ impl Messages {
             match chunk_result {
                 Ok(chunk) => {
                     let chunk_content = chunk.message.content;
+                    if chunk_content.len() > 10 {
+                        continue; // Skip long chunks
+                    }
                     assistant_text.push_str(&chunk_content);
                     on_chunk(chunk_content); // Send chunk to callback
                 }
